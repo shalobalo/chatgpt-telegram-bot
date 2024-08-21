@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import io
+import json
 
 from uuid import uuid4
 from telegram import BotCommandScopeAllGroupChats, Update, constants
@@ -59,6 +60,19 @@ class ChatGPTTelegramBot:
         self.usage = {}
         self.last_message = {}
         self.inline_queries_cache = {}
+
+        if self.config['allowed_group_ids'] == '*':
+           self.groupFilter=filters.User(chat_id=None, username=None, allow_empty=True)
+        else:
+           self.groupFilter=filters.Chat([int(element) for element in self.config['allowed_group_ids'].split(',')])
+
+        if self.config['allowed_user_ids'] == '*':
+           self.userFilter=filters.User(user_id=None, username=None, allow_empty=True)
+        else:
+           self.userFilter=filters.User([int(element) for element in self.config['allowed_user_ids'].split(',')])
+
+        logging.warning(f'User Filter: {self.userFilter}')
+        logging.warning(f'Group Filter: {self.groupFilter}')
 
     async def help(self, update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         """
@@ -643,6 +657,13 @@ class ChatGPTTelegramBot:
 
         await wrap_with_indicator(update, context, _execute, constants.ChatAction.TYPING)
 
+    async def dustCollector(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        logger for all messages.
+        """
+        logging.info(f'Message: {update}')
+        logging.info(f'ChatID: {update.effective_chat.id}')
+ 
     async def prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
         React to incoming messages and respond accordingly.
@@ -1055,28 +1076,34 @@ class ChatGPTTelegramBot:
             .post_init(self.post_init) \
             .concurrent_updates(True) \
             .build()
+        application.add_handler(MessageHandler(filters.ALL, self.dustCollector, False), group=1)
 
         application.add_handler(CommandHandler('reset', self.reset))
         application.add_handler(CommandHandler('help', self.help))
-        application.add_handler(CommandHandler('image', self.image))
-        application.add_handler(CommandHandler('tts', self.tts))
+        application.add_handler(CommandHandler('image', self.image, self.groupFilter & self.userFilter ))
+        application.add_handler(CommandHandler('tts', self.tts, self.groupFilter & self.userFilter))
         application.add_handler(CommandHandler('start', self.help))
         application.add_handler(CommandHandler('stats', self.stats))
         application.add_handler(CommandHandler('resend', self.resend))
         application.add_handler(CommandHandler(
-            'chat', self.prompt, filters=filters.ChatType.GROUP | filters.ChatType.SUPERGROUP)
+            'chat', self.prompt, filters=filters.ChatType.GROUP & filters.ChatType.PRIVATE & filters.ChatType.SUPERGROUP)
         )
+
         application.add_handler(MessageHandler(
-            filters.PHOTO | filters.Document.IMAGE,
+            filters.PHOTO | filters.Document.IMAGE & self.groupFilter,
             self.vision))
+
         application.add_handler(MessageHandler(
             filters.AUDIO | filters.VOICE | filters.Document.AUDIO |
-            filters.VIDEO | filters.VIDEO_NOTE | filters.Document.VIDEO,
+            filters.VIDEO | filters.VIDEO_NOTE | filters.Document.VIDEO & self.groupFilter,
             self.transcribe))
-        application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), self.prompt))
+
+        application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND) & self.groupFilter, self.prompt))
+
         application.add_handler(InlineQueryHandler(self.inline_query, chat_types=[
             constants.ChatType.GROUP, constants.ChatType.SUPERGROUP, constants.ChatType.PRIVATE
         ]))
+
         application.add_handler(CallbackQueryHandler(self.handle_callback_inline_query))
 
         application.add_error_handler(error_handler)
