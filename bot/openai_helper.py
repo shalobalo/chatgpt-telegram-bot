@@ -2,7 +2,7 @@ from __future__ import annotations
 import datetime
 import logging
 import os
-
+import pytz
 import tiktoken
 
 import openai
@@ -572,8 +572,9 @@ class OpenAIHelper:
         """
         Resets the conversation history.
         """
-        today = datetime.date.today()
-        todaydate = today.strftime('Сегодня %d, %b %Y. ')
+        datetimenow = datetime.datetime.now(pytz.timezone('Europe/Moscow'))
+        todaydate = datetimenow.strftime('Сейчас %d %b %Y, %H:%M:%S. ')
+
         if content == '':
             content = todaydate + self.config['assistant_prompt']
         self.conversations[chat_id] = [{"role": "system", "content": content}]
